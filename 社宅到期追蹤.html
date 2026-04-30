@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>社宅系統 — 到期追蹤</title>
+  <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore-compat.js"></script>
+  <style>
+    :root {
+      --primary: #5FBE91;
+      --primary-dark: #3d9a71;
+      --danger:  #e02424;
+      --warning: #b8860b;
+      --bg:      #f4f7f5;
+      --card:    #ffffff;
+      --border:  #dce8e2;
+      --text:    #3C4650;
+      --muted:   #7a8a85;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, 'Noto Sans TC', sans-serif; background: var(--bg); color: var(--text); }
+
+    /* Header */
+    .header {
+      background: var(--primary); color: white;
+      padding: 0.875rem 1.5rem;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .header h1 { font-size: 1.1rem; font-weight: 700; }
+    .refresh-btn {
+      background: rgba(255,255,255,0.18); color: white;
+      border: none; border-radius: 5px;
+      padding: 0.35rem 0.875rem; font-size: 0.8rem; cursor: pointer;
+    }
+    .refresh-btn:hover { background: rgba(255,255,255,0.3); }
+
+    /* Source Toggle */
+    .source-bar {
+      background: white; border-bottom: 1px solid var(--border);
+      padding: 0.625rem 1.5rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .source-label { font-size: 0.8rem; color: var(--muted); margin-right: 0.25rem; }
+    .src-btn {
+      border: 1.5px solid var(--border); background: white; color: var(--muted);
+      border-radius: 6px; padding: 0.35rem 1rem;
+      font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.15s;
+    }
+    .src-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .src-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+    .record-count { margin-left: auto; font-size: 0.78rem; color: var(--muted); }
+
+    /* Month Tabs */
+    .month-nav {
+      background: white; border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem; display: flex; overflow-x: auto;
+    }
+    .month-nav::-webkit-scrollbar { display: none; }
+    .month-tab {
+      padding: 0.7rem 1.125rem; font-size: 0.875rem; color: var(--muted);
+      cursor: pointer; border-bottom: 3px solid transparent; white-space: nowrap;
+      user-select: none; flex-shrink: 0;
+    }
+    .month-tab:hover { color: var(--primary); }
+    .month-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .month-tab .badge {
+      background: #d6f0e4; color: var(--primary);
+      border-radius: 9999px; padding: 1px 7px; font-size: 0.7rem; margin-left: 4px;
+    }
+    .month-tab.active .badge { background: var(--primary); color: white; }
+
+    /* Main */
+    .main { padding: 1.25rem 1.5rem; max-width: 1100px; margin: 0 auto; }
+    .cases { display: flex; flex-direction: column; gap: 0.625rem; }
+
+    /* Section dividers */
+    .section-header {
+      display: flex; align-items: center; gap: 0.625rem;
+      margin: 1rem 0 0.5rem;
+    }
+    .section-header:first-child { margin-top: 0; }
+    .section-label {
+      font-size: 0.78rem; font-weight: 700; padding: 3px 10px; border-radius: 9999px;
+    }
+    .section-label.unprocessed { background: #fff3cd; color: #8a6500; }
+    .section-label.processed   { background: #d6f0e4; color: #1a6644; }
+    .section-count { font-size: 0.75rem; color: var(--muted); }
+    .section-line { flex: 1; height: 1px; background: var(--border); }
+
+    /* Cards */
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.875rem 1.125rem;
+      display: flex; flex-direction: column; gap: 0.625rem;
+    }
+    .card.extra-card    { border-left: 3px solid #2D8FD2; background: #f0f7fd; }
+    .card.processed-card { border-left: 3px solid var(--primary); background: #f6fdf9; opacity: 0.88; }
+
+    .card-top-row {
+      display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: start;
+    }
+    .card-left { display: flex; flex-direction: column; gap: 0.375rem; }
+    .card-top  { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+    .case-id {
+      background: #f3f4f6; border: 1px solid var(--border);
+      color: var(--muted); font-size: 0.72rem; padding: 1px 7px; border-radius: 4px;
+    }
+    .case-name { font-weight: 600; font-size: 0.95rem; }
+
+    .chip {
+      display: inline-flex; align-items: center;
+      font-size: 0.72rem; font-weight: 600; padding: 2px 9px; border-radius: 9999px;
+    }
+    .chip-urgent   { background: #fde8e8; color: var(--danger); }
+    .chip-soon     { background: #fff8d6; color: #8a6500; }
+    .chip-normal   { background: #d6f0e4; color: #2d7a57; }
+    .chip-manual   { background: #deeef9; color: #2D8FD2; }
+    .chip-rematch  { background: #d6f0e4; color: #2d7a57; }
+    .chip-early    { background: #fde8e8; color: var(--danger); }
+    .chip-renewed  { background: #d6f0e4; color: #1a6644; }
+    .chip-ended    { background: #fde8e8; color: var(--danger); }
+
+    .case-addr { font-size: 0.78rem; color: var(--muted); }
+    .case-note { font-size: 0.78rem; color: #2D8FD2; }
+    .processed-info {
+      font-size: 0.78rem; color: #1a6644;
+      background: #edfaf3; border-radius: 4px; padding: 3px 8px;
+      display: inline-block; margin-top: 2px;
+    }
+    .card-meta { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-top: 0.1rem; }
+    .meta {
+      background: #f9fafb; border: 1px solid #e5e7eb;
+      border-radius: 4px; font-size: 0.75rem; padding: 2px 8px; color: var(--muted);
+    }
+    .meta b { color: var(--text); font-weight: 500; }
+
+    /* Action Buttons */
+    .card-right { display: flex; flex-direction: column; gap: 0.375rem; min-width: 108px; }
+    .act-btn {
+      border: none; border-radius: 6px; padding: 0.45rem 0;
+      font-size: 0.82rem; font-weight: 500; cursor: pointer; width: 100%;
+      transition: background 0.15s, color 0.15s;
+    }
+    .act-renew  { background: #f0f0f0; color: #aaa; }
+    .act-renew:hover { background: #d6f0e4; color: #2d7a57; }
+    .act-renew.picked { background: #5FBE91; color: white; }
+    .act-end    { background: #f0f0f0; color: #aaa; }
+    .act-end:hover { background: #fde8e8; color: var(--danger); }
+    .act-end.picked { background: var(--danger); color: white; }
+    .act-delete { background: #f0f0f0; color: #aaa; }
+    .act-delete:hover { background: #fde8e8; color: var(--danger); }
+
+    /* Detail Row */
+    .detail-row {
+      border-top: 1px solid var(--border);
+      padding-top: 0.625rem;
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: flex-end;
+    }
+    .detail-group { display: flex; flex-direction: column; gap: 0.2rem; }
+    .detail-group label { font-size: 0.7rem; color: var(--muted); font-weight: 500; white-space: nowrap; }
+    .detail-input {
+      border: 1px solid #d1d5db; border-radius: 5px;
+      padding: 0.28rem 0.5rem; font-size: 0.8rem; outline: none;
+      background: #f9fafb; color: var(--text);
+      transition: border-color 0.15s, background 0.15s; width: 110px;
+    }
+    .detail-input:focus { border-color: var(--primary); background: white; }
+    .detail-input[type="date"] { width: 130px; }
+    .check-group { display: flex; flex-direction: column; gap: 0.2rem; }
+    .check-group label.title { font-size: 0.7rem; color: var(--muted); font-weight: 500; }
+    .check-wrap { display: flex; align-items: center; gap: 0.35rem; height: 28px; }
+    .check-wrap input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; }
+    .check-wrap span { font-size: 0.8rem; color: var(--text); white-space: nowrap; }
+    .detail-sep { width: 1px; background: var(--border); align-self: stretch; margin: 0 0.25rem; }
+
+    /* Extra section */
+    .extra-section { margin-top: 0.75rem; }
+    .add-extra-btn {
+      display: flex; align-items: center; gap: 0.4rem;
+      background: white; border: 1.5px dashed #d1d5db; border-radius: 8px;
+      padding: 0.6rem 1rem; font-size: 0.82rem; color: var(--muted);
+      cursor: pointer; width: 100%; transition: all 0.15s;
+    }
+    .add-extra-btn:hover { border-color: #2D8FD2; color: #2D8FD2; background: #f0f7fd; }
+    .add-extra-btn .plus { font-size: 1rem; font-weight: 700; }
+    .extra-form {
+      background: #f0f7fd; border: 1.5px solid #2D8FD2; border-radius: 8px;
+      padding: 1rem 1.125rem; display: none; flex-direction: column; gap: 0.625rem;
+      margin-top: 0.5rem;
+    }
+    .extra-form.open { display: flex; }
+    .extra-form-title { font-size: 0.875rem; font-weight: 600; color: #2D8FD2; }
+    .form-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .form-field { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; min-width: 140px; }
+    .form-field label { font-size: 0.75rem; color: var(--muted); }
+    .form-field input, .form-field select {
+      border: 1px solid #d1d5db; border-radius: 6px;
+      padding: 0.375rem 0.625rem; font-size: 0.82rem; outline: none;
+      background: white; transition: border-color 0.15s;
+    }
+    .form-field input:focus, .form-field select:focus { border-color: #5FBE91; }
+    .form-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+    .btn-confirm {
+      background: #5FBE91; color: white; border: none; border-radius: 6px;
+      padding: 0.4rem 1rem; font-size: 0.82rem; font-weight: 500; cursor: pointer;
+    }
+    .btn-confirm:hover { background: #3d9a71; }
+    .btn-cancel {
+      background: white; color: var(--muted); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.4rem 1rem; font-size: 0.82rem; cursor: pointer;
+    }
+    .btn-cancel:hover { color: var(--text); }
+
+    /* States */
+    .state { text-align: center; padding: 3.5rem 1rem; color: var(--muted); }
+    .state-icon { font-size: 2rem; margin-bottom: 0.625rem; }
+    .state p { font-size: 0.875rem; line-height: 1.6; }
+    .spinner {
+      display: inline-block; width: 26px; height: 26px;
+      border: 3px solid #e5e7eb; border-top-color: var(--primary);
+      border-radius: 50%; animation: spin 0.7s linear infinite; margin-bottom: 0.625rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      background: #1f2937; color: white;
+      padding: 0.625rem 1.125rem; border-radius: 7px;
+      font-size: 0.82rem; z-index: 999;
+      opacity: 0; transform: translateY(6px);
+      transition: opacity 0.25s, transform 0.25s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>社宅系統 — 到期追蹤</h1>
+  <button class="refresh-btn" onclick="refreshRagic()">重新整理</button>
+</div>
+
+<div class="source-bar">
+  <span class="source-label">資料來源：</span>
+  <button class="src-btn active" id="src-own"     onclick="switchSource('own')">租寓</button>
+  <button class="src-btn"        id="src-partner" onclick="switchSource('partner')">加盟主</button>
+  <span class="record-count" id="recordCount"></span>
+</div>
+
+<div class="month-nav" id="monthNav"></div>
+
+<div class="main">
+  <div id="content">
+    <div class="state"><div class="spinner"></div><p>載入中...</p></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Firebase ──────────────────────────────────────────────────────────────────
+firebase.initializeApp({
+  apiKey:            'AIzaSyA8DJTCcNKZTHAZ1YI6NPjrZw3fPDLkFCw',
+  authDomain:        'social-housing-b6044.firebaseapp.com',
+  projectId:         'social-housing-b6044',
+  storageBucket:     'social-housing-b6044.firebasestorage.app',
+  messagingSenderId: '914069543502',
+  appId:             '1:914069543502:web:076a7aa1b46e2c6e6bc11f',
+});
+const db = firebase.firestore();
+
+// ── Ragic Config ──────────────────────────────────────────────────────────────
+const API_KEY = 'WHNwcW1abHY1RE5hYkJSZTZYSjJrUVk4U0lqdTJKdTR0UjdKZFplWWNDNzB4RW1nR0hoUVBMc3orOEJLcjZvaHVsTEdMQVRrMC9sZTZJRmwwbFJ3elE9PQ==';
+const BASE    = 'https://ap14.ragic.com/zuyou2022';
+
+const SOURCES = {
+  own: {
+    path:        'forms14/17',
+    expireField: '契約結束日',
+    nameField:   '房源名稱',
+    addrField:   '完整地址',
+    typeField:   '管理模式',
+    vendorField: '管理公司',
+    periodField: null,
+    idField:     '房源編號',
+  },
+  partner: {
+    path:        'forms14/22',
+    expireField: '契約結束日',
+    nameField:   '房源名稱',
+    addrField:   '完整地址',
+    typeField:   '管理模式',
+    vendorField: '加盟主',
+    periodField: '期數',
+    idField:     '物件編號',
+  },
+};
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let activeSource  = 'own';
+let activeMonth   = null;
+let allRecords    = [];   // Live Ragic records for current source
+let snapshotCache = {};   // { [docId]: snapshotData }
+
+// ── Date Helpers ──────────────────────────────────────────────────────────────
+function parseDate(val) {
+  if (!val) return null;
+  const s = String(val).trim();
+  let m = s.match(/^(\d{3})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (m) return { y: +m[1] + 1911, mo: +m[2], d: +m[3] };
+  m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (m) return { y: +m[1], mo: +m[2], d: +m[3] };
+  return null;
+}
+function toJSDate(p) { return p ? new Date(p.y, p.mo - 1, p.d) : null; }
+function monthKey(p) { return `${p.y}${String(p.mo).padStart(2,'0')}`; }
+function monthLabel(key) {
+  const roc = +key.slice(0,4) - 1911;
+  return `民國 ${roc} 年 ${+key.slice(4)} 月`;
+}
+function fmtDate(p) {
+  if (!p) return '—';
+  return `${p.y - 1911}/${p.mo}/${p.d}`;
+}
+function chipInfo(p) {
+  if (!p) return { cls: 'chip-normal', tag: '到期' };
+  const diff = (toJSDate(p) - new Date()) / 86400000;
+  if (diff < 0)  return { cls: 'chip-urgent', tag: '已過期' };
+  if (diff < 30) return { cls: 'chip-urgent', tag: '即將到期' };
+  if (diff < 60) return { cls: 'chip-soon',   tag: '近期到期' };
+  return           { cls: 'chip-normal',  tag: '到期' };
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+// ── Contract helpers ──────────────────────────────────────────────────────────
+function getLatestContractDate(record) {
+  const contracts = record['包租/代管契約紀錄'];
+  if (!contracts || typeof contracts !== 'object') return null;
+  const rows = Object.values(contracts).filter(r => r && typeof r === 'object');
+  if (!rows.length) return null;
+  rows.sort((a, b) => {
+    const da = parseDate(a['契約迄']), db = parseDate(b['契約迄']);
+    return (db ? toJSDate(db).getTime() : 0) - (da ? toJSDate(da).getTime() : 0);
+  });
+  return parseDate(rows[0]['契約迄']);
+}
+function getExpiry(record) {
+  return getLatestContractDate(record) || parseDate(record[SOURCES[activeSource].expireField]);
+}
+function uid(record) { return String(record._ragicId); }
+
+// ── Ragic API ─────────────────────────────────────────────────────────────────
+async function ragicFetch(path) {
+  const url = `${BASE}/${path}?api&APIKey=${encodeURIComponent(API_KEY)}&limit=2000`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return Object.values(data).filter(r => r && typeof r === 'object' && r._ragicId);
+}
+
+// ── Firebase Snapshot ─────────────────────────────────────────────────────────
+function snapshotDocId(source, mk) { return `${source}_${mk}`; }
+
+async function loadSnapshot(source, mk) {
+  const docId = snapshotDocId(source, mk);
+  if (snapshotCache[docId] !== undefined) return snapshotCache[docId];
+  const doc = await db.collection('housing_snapshots').doc(docId).get();
+  snapshotCache[docId] = doc.exists ? doc.data() : null;
+  return snapshotCache[docId];
+}
+
+async function saveSnapshot(source, mk, data) {
+  const docId = snapshotDocId(source, mk);
+  snapshotCache[docId] = data;
+  await db.collection('housing_snapshots').doc(docId).set(data);
+}
+
+// ── Load Ragic Data ───────────────────────────────────────────────────────────
+async function loadData() {
+  const src = SOURCES[activeSource];
+  setContent('<div class="state"><div class="spinner"></div><p>載入中...</p></div>');
+  document.getElementById('monthNav').innerHTML = '';
+  document.getElementById('recordCount').textContent = '';
+
+  try {
+    let records = await ragicFetch(src.path);
+
+    if (activeSource === 'own') {
+      records = records.filter(r => r['管理公司'] === '租寓(大台北)');
+    }
+    records = records.filter(r => r[src.expireField] && String(r[src.expireField]).trim());
+    records = records.filter(r => {
+      const d = getLatestContractDate(r) || parseDate(r[src.expireField]);
+      return d && d.y >= 2026;
+    });
+    // 排除最新契約狀態含「解約」的案件
+    records = records.filter(r => {
+      const contracts = r['包租/代管契約紀錄'];
+      if (!contracts || typeof contracts !== 'object') return true;
+      const rows = Object.values(contracts).filter(x => x && typeof x === 'object');
+      if (!rows.length) return true;
+      rows.sort((a, b) => {
+        const da = parseDate(a['契約迄']), db = parseDate(b['契約迄']);
+        return (db ? toJSDate(db).getTime() : 0) - (da ? toJSDate(da).getTime() : 0);
+      });
+      return !String(rows[0]['契約狀態'] || '').includes('解約');
+    });
+    // 去重
+    const seen = new Set();
+    records = records.filter(r => {
+      const id = uid(r);
+      if (seen.has(id)) return false;
+      seen.add(id); return true;
+    });
+
+    allRecords = records;
+    document.getElementById('recordCount').textContent = `共 ${allRecords.length} 筆`;
+    buildMonthNav();
+  } catch (e) {
+    setContent(`<div class="state"><div class="state-icon">⚠️</div><p>載入失敗：${e.message}</p></div>`);
+  }
+}
+
+async function refreshRagic() {
+  snapshotCache = {}; // clear cache so snapshots reload
+  await loadData();
+}
+
+// ── Month Nav ─────────────────────────────────────────────────────────────────
+function buildMonthNav() {
+  // Always show all months of 2026; also include months from live data
+  const monthSet = new Set();
+  for (let mo = 1; mo <= 12; mo++) monthSet.add(`2026${String(mo).padStart(2,'0')}`);
+  for (const r of allRecords) {
+    const d = getExpiry(r);
+    if (d) monthSet.add(monthKey(d));
+  }
+  const keys = Array.from(monthSet).sort();
+
+  const now    = new Date();
+  const curKey = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}`;
+  activeMonth  = keys.includes(curKey) ? curKey : keys[0];
+
+  renderTabs(keys);
+  renderMonthAsync(activeMonth);
+}
+
+function renderTabs(keys) {
+  document.getElementById('monthNav').innerHTML = keys.map(k => `
+    <div class="month-tab ${k === activeMonth ? 'active' : ''}" onclick="selectMonth('${k}')">
+      ${monthLabel(k)}
+    </div>`).join('');
+}
+
+function selectMonth(key) {
+  activeMonth = key;
+  const monthSet = new Set();
+  for (let mo = 1; mo <= 12; mo++) monthSet.add(`2026${String(mo).padStart(2,'0')}`);
+  for (const r of allRecords) { const d = getExpiry(r); if (d) monthSet.add(monthKey(d)); }
+  renderTabs(Array.from(monthSet).sort());
+  renderMonthAsync(key);
+}
+
+// ── Render Month (async, with snapshot) ──────────────────────────────────────
+async function renderMonthAsync(mk) {
+  setContent('<div class="state"><div class="spinner"></div><p>載入中...</p></div>');
+  try {
+    let snapshot = await loadSnapshot(activeSource, mk);
+
+    // Get current Ragic records expiring in this month
+    const ragicForMonth = allRecords.filter(r => {
+      const d = getExpiry(r);
+      return d && monthKey(d) === mk;
+    });
+
+    // Build / update snapshot
+    const cases = snapshot?.cases ? JSON.parse(JSON.stringify(snapshot.cases)) : {};
+    let needsSave = !snapshot; // save if brand new
+
+    for (const r of ragicForMonth) {
+      const id = uid(r);
+      if (!cases[id]) {
+        cases[id] = buildSnapshotCase(r);
+        needsSave = true;
+      }
+    }
+
+    if (needsSave) {
+      const newSnap = { cases, extras: snapshot?.extras || [] };
+      await saveSnapshot(activeSource, mk, newSnap);
+      snapshot = newSnap;
+    }
+
+    renderMonthUI(mk, snapshot, ragicForMonth);
+  } catch(e) {
+    setContent(`<div class="state"><div class="state-icon">⚠️</div><p>載入失敗：${e.message}</p></div>`);
+  }
+}
+
+function buildSnapshotCase(r) {
+  const src = SOURCES[activeSource];
+  const isPartner = activeSource === 'partner';
+  return {
+    name:           r[src.nameField]   || '',
+    addr:           r[src.addrField]   || '',
+    originalExpiry: fmtDate(getExpiry(r)),
+    type:           r[src.typeField]   || '',
+    vendor:         r[src.vendorField] || '',
+    period:         src.periodField ? (r[src.periodField] || '') : '',
+    displayId:      r[src.idField]     || '',
+    isPartner,
+    details:        {},
+    action:         '',
+  };
+}
+
+// ── Render UI ─────────────────────────────────────────────────────────────────
+function renderMonthUI(mk, snapshot, ragicForMonth) {
+  const cases  = snapshot?.cases  || {};
+  const extras = snapshot?.extras || [];
+
+  // Build a map from ragicId → current expiry for comparison
+  const ragicMap = {};
+  for (const r of allRecords) {
+    ragicMap[uid(r)] = fmtDate(getExpiry(r));
+  }
+
+  const unprocessed = [];
+  const processed   = [];
+
+  for (const [id, c] of Object.entries(cases)) {
+    const currentExpiry = ragicMap[id]; // may be undefined if case moved to another month
+    const autoProcessed = !!currentExpiry && currentExpiry !== c.originalExpiry;
+    const manualProcessed = !!c.action;
+
+    if (autoProcessed || manualProcessed) {
+      processed.push({ id, c, currentExpiry, autoProcessed });
+    } else {
+      unprocessed.push({ id, c, currentExpiry });
+    }
+  }
+
+  // Sort by original expiry date
+  const sortByExpiry = (a, b) => {
+    const pa = parseDate(a.c.originalExpiry), pb = parseDate(b.c.originalExpiry);
+    const ta = pa ? toJSDate(pa).getTime() : 0;
+    const tb = pb ? toJSDate(pb).getTime() : 0;
+    return ta - tb;
+  };
+  unprocessed.sort(sortByExpiry);
+  processed.sort(sortByExpiry);
+
+  const unprocessedExtras = extras.filter(e => !e.action);
+  const processedExtras   = extras.filter(e => !!e.action);
+
+  let html = '';
+
+  // ── 未處理 section ──
+  const unpTotal = unprocessed.length + unprocessedExtras.length;
+  html += `<div class="section-header">
+    <span class="section-label unprocessed">未處理</span>
+    <span class="section-count">${unpTotal} 件</span>
+    <div class="section-line"></div>
+  </div>`;
+
+  if (unpTotal === 0) {
+    html += `<div class="state" style="padding:1.5rem"><p>本月未處理案件已全部完成</p></div>`;
+  } else {
+    html += `<div class="cases">`;
+    for (const item of unprocessed) html += renderCaseCard(mk, item.id, item.c, false, item.currentExpiry);
+    for (let i = 0; i < unprocessedExtras.length; i++) {
+      if (!unprocessedExtras[i].action) html += renderExtraCard(mk, extras.indexOf(unprocessedExtras[i]), unprocessedExtras[i]);
+    }
+    html += `</div>`;
+  }
+
+  // ── 已處理 section ──
+  const proTotal = processed.length + processedExtras.length;
+  html += `<div class="section-header" style="margin-top:1.5rem">
+    <span class="section-label processed">已處理</span>
+    <span class="section-count">${proTotal} 件</span>
+    <div class="section-line"></div>
+  </div>`;
+
+  if (proTotal === 0) {
+    html += `<div class="state" style="padding:1.5rem"><p>尚無已處理案件</p></div>`;
+  } else {
+    html += `<div class="cases">`;
+    for (const item of processed) html += renderCaseCard(mk, item.id, item.c, true, item.currentExpiry, item.autoProcessed);
+    for (let i = 0; i < processedExtras.length; i++) {
+      html += renderExtraCard(mk, extras.indexOf(processedExtras[i]), processedExtras[i]);
+    }
+    html += `</div>`;
+  }
+
+  // ── 新增特殊案件 ──
+  const isPartner = activeSource === 'partner';
+  html += `
+  <div class="extra-section">
+    <button class="add-extra-btn" onclick="toggleAddForm('form-${mk}')">
+      <span class="plus">＋</span> 新增特殊案件（再媒合 / 提前解約）
+    </button>
+    <div class="extra-form" id="form-${mk}">
+      <div class="extra-form-title">新增特殊案件</div>
+      <div class="form-row">
+        <div class="form-field" style="min-width:120px; max-width:160px;">
+          <label>類型</label>
+          <select id="ef-type-${mk}">
+            <option value="再媒合">再媒合</option>
+            <option value="提前解約">提前解約</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>${isPartner ? '地址' : '房源名稱'}</label>
+          <input type="text" id="ef-name-${mk}" placeholder="${isPartner ? '請輸入完整地址' : '請輸入房源名稱'}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label>備註（選填）</label>
+          <input type="text" id="ef-note-${mk}" placeholder="其他說明">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="toggleAddForm('form-${mk}')">取消</button>
+        <button class="btn-confirm" onclick="saveExtra('${mk}')">確認新增</button>
+      </div>
+    </div>
+  </div>`;
+
+  setContent(html);
+}
+
+// ── Card Templates ────────────────────────────────────────────────────────────
+function renderCaseCard(mk, id, c, isProcessed, currentExpiry, autoProcessed) {
+  const d   = parseDate(c.originalExpiry);
+  const ci  = chipInfo(d);
+  const act = c.action || '';
+
+  const isPartner    = c.isPartner || activeSource === 'partner';
+  const displayTitle = isPartner ? (c.addr || '（無地址）') : (c.name || '（未命名）');
+  const displayAddr  = isPartner ? '' : c.addr;
+
+  let statusChip = '';
+  if (isProcessed) {
+    if (act === 'renew' || autoProcessed) {
+      const newExp = currentExpiry && currentExpiry !== c.originalExpiry ? `→ 新到期：${currentExpiry}` : '';
+      statusChip = `<span class="chip chip-renewed">已續約 ${newExp}</span>`;
+    } else if (act === 'end') {
+      statusChip = `<span class="chip chip-ended">已解約</span>`;
+    }
+  }
+
+  return `
+  <div class="card ${isProcessed ? 'processed-card' : ''}" id="card-${id}">
+    <div class="card-top-row">
+      <div class="card-left">
+        <div class="card-top">
+          ${c.displayId ? `<span class="case-id">${c.displayId}</span>` : ''}
+          <span class="case-name">${displayTitle}</span>
+          <span class="chip ${ci.cls}">${ci.tag}：${fmtDate(d)}</span>
+          ${statusChip}
+        </div>
+        ${displayAddr ? `<div class="case-addr">📍 ${displayAddr}</div>` : ''}
+        <div class="card-meta">
+          ${c.period ? `<div class="meta">期數 <b>${c.period}</b></div>` : ''}
+          ${c.vendor ? `<div class="meta">廠商 <b>${c.vendor}</b></div>` : ''}
+          ${c.type   ? `<div class="meta">契約類型 <b>${c.type}</b></div>` : ''}
+        </div>
+      </div>
+      <div class="card-right">
+        <button class="act-btn act-renew ${act==='renew'?'picked':''}"
+          onclick="pickCase('${mk}','${id}','renew',this)">續約</button>
+        <button class="act-btn act-end ${act==='end'?'picked':''}"
+          onclick="pickCase('${mk}','${id}','end',this)">到期解約</button>
+      </div>
+    </div>
+    ${detailRowHtml(mk, id, c.details || {})}
+  </div>`;
+}
+
+function renderExtraCard(mk, idx, ex) {
+  const typeChipCls = ex.type === '再媒合' ? 'chip-rematch' : 'chip-early';
+  const act = ex.action || '';
+  const isProcessed = !!act;
+  return `
+  <div class="card extra-card ${isProcessed ? 'processed-card' : ''}" id="extra-card-${mk}-${idx}">
+    <div class="card-top-row">
+      <div class="card-left">
+        <div class="card-top">
+          <span class="chip chip-manual">手動新增</span>
+          <span class="case-name">${ex.name || '（未命名）'}</span>
+          <span class="chip ${typeChipCls}">${ex.type}</span>
+          ${act === 'renew' ? '<span class="chip chip-renewed">已續約</span>' : ''}
+          ${act === 'end'   ? '<span class="chip chip-ended">已解約</span>'   : ''}
+        </div>
+        ${ex.note ? `<div class="case-note">📝 ${ex.note}</div>` : ''}
+      </div>
+      <div class="card-right">
+        <button class="act-btn act-renew ${act==='renew'?'picked':''}"
+          onclick="pickExtra('${mk}',${idx},'renew',this)">續約</button>
+        <button class="act-btn act-end ${act==='end'?'picked':''}"
+          onclick="pickExtra('${mk}',${idx},'end',this)">到期解約</button>
+        <button class="act-btn act-delete" onclick="deleteExtra('${mk}',${idx})">刪除</button>
+      </div>
+    </div>
+    ${detailRowHtml(mk, 'extra_'+idx, ex.details || {})}
+  </div>`;
+}
+
+function detailRowHtml(mk, id, d) {
+  d = d || {};
+  return `
+  <div class="detail-row">
+    <div class="detail-group">
+      <label>媒合編號</label>
+      <input class="detail-input" type="text" placeholder="—"
+        value="${escHtml(d.matchId || '')}"
+        onchange="saveDetail('${mk}','${id}','matchId',this.value)">
+    </div>
+    <div class="detail-group">
+      <label>房客編號</label>
+      <input class="detail-input" type="text" placeholder="—"
+        value="${escHtml(d.tenantId || '')}"
+        onchange="saveDetail('${mk}','${id}','tenantId',this.value)">
+    </div>
+    <div class="detail-group">
+      <label>物件編號</label>
+      <input class="detail-input" type="text" placeholder="—"
+        value="${escHtml(d.propId || '')}"
+        onchange="saveDetail('${mk}','${id}','propId',this.value)">
+    </div>
+    <div class="detail-sep"></div>
+    <div class="detail-group">
+      <label>收件日期</label>
+      <input class="detail-input" type="date"
+        value="${escHtml(d.recvDate || '')}"
+        onchange="saveDetail('${mk}','${id}','recvDate',this.value)">
+    </div>
+    <div class="detail-group">
+      <label>送件日期</label>
+      <input class="detail-input" type="date"
+        value="${escHtml(d.sendDate || '')}"
+        onchange="saveDetail('${mk}','${id}','sendDate',this.value)">
+    </div>
+    <div class="check-group">
+      <label class="title">300億租補</label>
+      <div class="check-wrap">
+        <input type="checkbox" ${d.subsidy ? 'checked' : ''}
+          onchange="saveDetail('${mk}','${id}','subsidy',this.checked)">
+        <span>已完成</span>
+      </div>
+    </div>
+    <div class="check-group">
+      <label class="title">實價登錄</label>
+      <div class="check-wrap">
+        <input type="checkbox" ${d.priceReg ? 'checked' : ''}
+          onchange="saveDetail('${mk}','${id}','priceReg',this.checked)">
+        <span>已完成</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+async function pickCase(mk, id, act, btn) {
+  const snap = await loadSnapshot(activeSource, mk);
+  if (!snap || !snap.cases[id]) return;
+
+  const prev = snap.cases[id].action || '';
+  snap.cases[id].action = prev === act ? '' : act;
+  await saveSnapshot(activeSource, mk, snap);
+
+  const card = document.getElementById(`card-${id}`);
+  card.querySelectorAll('.act-btn').forEach(b => b.classList.remove('picked'));
+  if (snap.cases[id].action) btn.classList.add('picked');
+  toast(snap.cases[id].action
+    ? (act === 'renew' ? '已標記：續約' : '已標記：到期解約')
+    : '已取消標記');
+
+  // Re-render to move between sections
+  const ragicForMonth = allRecords.filter(r => {
+    const d = getExpiry(r); return d && monthKey(d) === mk;
+  });
+  renderMonthUI(mk, snap, ragicForMonth);
+}
+
+async function pickExtra(mk, idx, act, btn) {
+  const snap = await loadSnapshot(activeSource, mk);
+  if (!snap) return;
+
+  const prev = snap.extras[idx]?.action || '';
+  snap.extras[idx].action = prev === act ? '' : act;
+  await saveSnapshot(activeSource, mk, snap);
+
+  toast(snap.extras[idx].action
+    ? (act === 'renew' ? '已標記：續約' : '已標記：到期解約')
+    : '已取消標記');
+
+  const ragicForMonth = allRecords.filter(r => {
+    const d = getExpiry(r); return d && monthKey(d) === mk;
+  });
+  renderMonthUI(mk, snap, ragicForMonth);
+}
+
+async function saveDetail(mk, id, field, value) {
+  const snap = await loadSnapshot(activeSource, mk);
+  if (!snap) return;
+
+  if (id.startsWith('extra_')) {
+    const idx = parseInt(id.replace('extra_', ''));
+    if (!snap.extras[idx].details) snap.extras[idx].details = {};
+    snap.extras[idx].details[field] = value;
+  } else {
+    if (!snap.cases[id]) return;
+    if (!snap.cases[id].details) snap.cases[id].details = {};
+    snap.cases[id].details[field] = value;
+  }
+  await saveSnapshot(activeSource, mk, snap);
+}
+
+// ── Extra CRUD ────────────────────────────────────────────────────────────────
+function toggleAddForm(formId) {
+  document.getElementById(formId).classList.toggle('open');
+}
+
+async function saveExtra(mk) {
+  const type = document.getElementById(`ef-type-${mk}`).value;
+  const name = document.getElementById(`ef-name-${mk}`).value.trim();
+  const note = document.getElementById(`ef-note-${mk}`).value.trim();
+  if (!name) { toast(activeSource === 'partner' ? '請填寫地址' : '請填寫房源名稱'); return; }
+
+  const snap = (await loadSnapshot(activeSource, mk)) || { cases: {}, extras: [] };
+  if (!snap.extras) snap.extras = [];
+  snap.extras.push({ type, name, note, action: '', details: {} });
+  await saveSnapshot(activeSource, mk, snap);
+
+  toast(`已新增：${type} — ${name}`);
+  const ragicForMonth = allRecords.filter(r => {
+    const d = getExpiry(r); return d && monthKey(d) === mk;
+  });
+  renderMonthUI(mk, snap, ragicForMonth);
+}
+
+async function deleteExtra(mk, idx) {
+  const snap = await loadSnapshot(activeSource, mk);
+  if (!snap) return;
+  const removed = snap.extras.splice(idx, 1);
+  await saveSnapshot(activeSource, mk, snap);
+  toast(`已刪除：${removed[0]?.name || '案件'}`);
+  const ragicForMonth = allRecords.filter(r => {
+    const d = getExpiry(r); return d && monthKey(d) === mk;
+  });
+  renderMonthUI(mk, snap, ragicForMonth);
+}
+
+// ── Source Switch ─────────────────────────────────────────────────────────────
+function switchSource(src) {
+  activeSource = src;
+  document.querySelectorAll('.src-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`src-${src}`).classList.add('active');
+  loadData();
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function setContent(html) { document.getElementById('content').innerHTML = html; }
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
